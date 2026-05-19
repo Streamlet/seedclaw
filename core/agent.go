@@ -10,12 +10,36 @@ import (
 	"strings"
 )
 
+var ToolAgentName = "agent"
+var ToolShellName = "shell"
+
 // Fixed tool definitions used by every agent.
 var Tools = []Tool{
 	{
 		Type: "function",
 		Function: ToolFunction{
-			Name:        "shell",
+			Name:        ToolAgentName,
+			Description: "Spawn a sub-agent to complete a task. Sub-agents are independent agents with their own system prompt and capabilities.",
+			Parameters: Parameters{
+				Type: "object",
+				Properties: map[string]Property{
+					"name": {
+						Type:        "string",
+						Description: "Name of the sub-agent, corresponding to a subdirectory under agents/",
+					},
+					"task": {
+						Type:        "string",
+						Description: "Task description. The sub-agent will complete this independently.",
+					},
+				},
+				Required: []string{"name", "task"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: ToolFunction{
+			Name:        ToolShellName,
 			Description: "Execute a whitelisted shell command.",
 			Parameters: Parameters{
 				Type: "object",
@@ -36,66 +60,62 @@ var Tools = []Tool{
 			},
 		},
 	},
-	{
-		Type: "function",
-		Function: ToolFunction{
-			Name:        "agent",
-			Description: "Spawn a sub-agent to complete a task. Sub-agents are independent agents with their own system prompt and capabilities.",
-			Parameters: Parameters{
-				Type: "object",
-				Properties: map[string]Property{
-					"name": {
-						Type:        "string",
-						Description: "Name of the sub-agent, corresponding to a subdirectory under agents/",
-					},
-					"task": {
-						Type:        "string",
-						Description: "Task description. The sub-agent will complete this independently.",
-					},
-				},
-				Required: []string{"name", "task"},
-			},
-		},
-	},
+}
+
+type ShellArguments struct {
+	Command   string   `json:"command"`
+	Arguments []string `json:"arguments,omitempty"`
+}
+
+type AgentArguments struct {
+	Name string `json:"name"`
+	Task string `json:"task"`
 }
 
 //go:embed protocol.md
 var interactionProtocol string // Interaction protocol appended to every system prompt.
+
+var subAgentsDir = "agents" // Relative path to sub-agents from each agent directory
+var systemPromptFileName = "system.md"
+var apiFileName = "api.md"
 
 type Agent struct {
 	SystemPrompt string
 	Config       *Config
 	SessionID    string
 	AgentDir     string // directory containing system.md and agents/
+	Workspace    string
 }
 
 // LoadAgent reads system.md, scans sub-agents, replaces {{AGENTS}}, and returns an Agent.
 // It works identically for root and sub-agents.
-func LoadAgent(dir string, cfg *Config, sessionID string) (*Agent, error) {
+func LoadAgent(dir string, cfg *Config, sessionID string, workspace string) (*Agent, error) {
 	// Read system prompt
-	systemPath := filepath.Join(dir, "system.md")
+	systemPath := filepath.Join(dir, systemPromptFileName)
 	systemBytes, err := os.ReadFile(systemPath)
 	if err != nil {
-		return nil, fmt.Errorf("read system.md from %s: %w", dir, err)
+		return nil, fmt.Errorf("read %s from %s: %w", systemPromptFileName, dir, err)
 	}
 	systemPrompt := string(systemBytes)
 
 	// Look for sub-agents
-	agentsDir := filepath.Join(dir, "agents")
+	agentsDir := filepath.Join(dir, subAgentsDir)
 	entries, err := os.ReadDir(agentsDir)
 	var agentDescriptions string
+	subAgents := []string{}
 	if err == nil && len(entries) > 0 {
 		var parts []string
 		for _, e := range entries {
 			if !e.IsDir() {
 				continue
 			}
-			apiPath := filepath.Join(agentsDir, e.Name(), "api.md")
+			apiPath := filepath.Join(agentsDir, e.Name(), apiFileName)
 			apiBytes, err := os.ReadFile(apiPath)
 			if err != nil {
 				// Skip sub-agents without api.md
 				continue
 			}
+			subAgents = append(subAgents, e.Name())
 			parts = append(parts, fmt.Sprintf("## %s\n%s", e.Name(), string(apiBytes)))
 		}
 		if len(parts) > 0 {
@@ -108,80 +128,93 @@ func LoadAgent(dir string, cfg *Config, sessionID string) (*Agent, error) {
 
 	// Replace placeholder and append protocol
 	finalPrompt := strings.Replace(systemPrompt, "{{AGENTS}}", agentDescriptions, 1)
-	finalPrompt += interactionProtocol
+	protocol := strings.Replace(interactionProtocol, "{{ALLOWED_AGENTS}}", strings.Join(subAgents, ","), -1)
+	protocol = strings.Replace(protocol, "{{ALLOWED_CMD}}", strings.Join(cfg.Shell.AllowedCmd, ","), -1)
+	finalPrompt += protocol
 
 	return &Agent{
 		SystemPrompt: finalPrompt,
 		Config:       cfg,
 		SessionID:    sessionID,
 		AgentDir:     dir,
+		Workspace:    workspace,
 	}, nil
 }
 
 // Run executes the main agent loop with the given user input.
 func (a *Agent) Run(userInput string) (string, error) {
-	workDir := filepath.Join(a.Config.Agent.Workspace, a.SessionID)
-	if err := os.MkdirAll(workDir, 0755); err != nil {
+	if err := os.MkdirAll(a.Workspace, 0755); err != nil {
 		return "", fmt.Errorf("create workspace: %w", err)
 	}
 
 	messages := []Message{
-		{Role: "system", Content: a.SystemPrompt},
-		{Role: "user", Content: userInput},
+		{Role: RoleSystem, Content: a.SystemPrompt},
+		{Role: RoleUser, Content: userInput},
 	}
 	log.Printf("[session=%s step=%d] User input: %s", a.SessionID, 0, truncate(userInput, 200))
 
 	for step := 0; step < a.Config.LLM.MaxSteps; step++ {
 		log.Printf("[session=%s step=%d] Calling LLM...", a.SessionID, step)
-		resp, err := Chat(a.Config, messages, Tools)
+		request := ChatCompletionRequest{
+			Messages: messages,
+			Tools:    Tools,
+		}
+		response, err := Chat(&a.Config.LLM, request)
 		if err != nil {
 			return "", fmt.Errorf("LLM call failed: %w", err)
 		}
-		if len(resp.Choices) == 0 {
+		if len(response.Choices) == 0 {
 			return "", fmt.Errorf("empty LLM response")
 		}
-		msg := resp.Choices[0].Message
+		msg := response.Choices[0].Message
 		log.Printf("[session=%s step=%d] LLM respond: %s", a.SessionID, step, truncate(msg.Content, 200))
 
-		// Case 1: model wants to call a tool
 		if len(msg.ToolCalls) > 0 {
-			// Append assistant message (with tool_calls)
 			messages = append(messages, Message{
-				Role:      "assistant",
+				Role:      RoleAssistant,
 				Content:   msg.Content,
 				ToolCalls: msg.ToolCalls,
 			})
 			for _, tc := range msg.ToolCalls {
 				log.Printf("[session=%s step=%d] Tool call: %s(%s)", a.SessionID, step, tc.Function.Name, truncate(tc.Function.Arguments, 200))
-
 				var result string
 				switch tc.Function.Name {
-				case "shell":
-					var args struct {
-						Command   string   `json:"command"`
-						Arguments []string `json:"arguments,omitempty"`
-					}
+				case ToolAgentName:
+					var args AgentArguments
 					if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
-						result = fmt.Sprintf("Invalid shell arguments: %v", err)
+						result = fmt.Sprintf("Invalid agent arguments: %v", err)
 					} else {
-						res, err := ExecuteShell(args.Command, args.Arguments, a.SessionID, a.Config.Shell.AllowedCmd, a.Config.Agent.Workspace)
+						subAgentDir := filepath.Join(a.AgentDir, subAgentsDir, args.Name)
+						if _, err := os.Stat(subAgentDir); os.IsNotExist(err) {
+							return fmt.Sprintf("Agent not found: %s", args.Name), nil
+						}
+						subWorkspace := filepath.Join(a.Workspace, args.Name)
+						if _, err := os.Stat(subWorkspace); os.IsNotExist(err) {
+							os.Mkdir(subWorkspace, 0755)
+						}
+						subAgent, err := LoadAgent(subAgentDir, a.Config, a.SessionID, subWorkspace)
 						if err != nil {
-							result = fmt.Sprintf("Execution failed: %s", err.Error())
+							return "", fmt.Errorf("load sub-agent %s: %w", args.Name, err)
+						}
+						res, err := subAgent.Run(args.Task)
+						if err != nil {
+							result = fmt.Sprintf("Agent execution failed: %s", err.Error())
 						} else {
 							result = res
 						}
 					}
-				case "agent":
-					var args struct {
-						Name string `json:"name"`
-						Task string `json:"task"`
-					}
+				case ToolShellName:
+					var args ShellArguments
 					if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
-						result = fmt.Sprintf("Invalid agent arguments: %v", err)
+						result = fmt.Sprintf("Invalid shell arguments: %v", err)
 					} else {
-						res, err := ExecuteAgent(a, args.Name, args.Task)
+						subWorkspace := filepath.Join(a.Workspace, args.Command)
+						if _, err := os.Stat(subWorkspace); os.IsNotExist(err) {
+							os.Mkdir(subWorkspace, 0755)
+						}
+						res, err := ExecuteShell(args.Command, args.Arguments, a.SessionID, a.Config.Shell.AllowedCmd, subWorkspace)
 						if err != nil {
-							result = fmt.Sprintf("Agent execution failed: %s", err.Error())
+							result = fmt.Sprintf("Execution failed: %s", err.Error())
 						} else {
 							result = res
 						}
@@ -189,22 +222,18 @@ func (a *Agent) Run(userInput string) (string, error) {
 				default:
 					result = fmt.Sprintf("Unknown tool: %s", tc.Function.Name)
 				}
-
 				log.Printf("[session=%s step=%d] Tool result: %s", a.SessionID, step, truncate(result, 200))
-
-				// Append tool result
 				messages = append(messages, Message{
-					Role:       "tool",
+					Role:       RoleTool,
 					ToolCallID: tc.ID,
 					Content:    result,
 				})
 			}
 		} else {
-			// Case 2: model returns text only
 			if msg.Content != "" {
 				log.Printf("[session=%s step=%d] Task complete", a.SessionID, step)
 				messages = append(messages, Message{
-					Role:    "assitant",
+					Role:    RoleAssistant,
 					Content: msg.Content,
 				})
 				return msg.Content, nil
@@ -213,7 +242,6 @@ func (a *Agent) Run(userInput string) (string, error) {
 			}
 		}
 	}
-
 	return "", fmt.Errorf("reached max steps %d without completion", a.Config.LLM.MaxSteps)
 }
 

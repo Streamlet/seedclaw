@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"seedclaw/core"
 	"strings"
 )
@@ -21,8 +22,9 @@ func main() {
 
 	sessionID := core.GenerateSessionID()
 	log.Printf("[session=%s] Session started", sessionID)
+	workspace := filepath.Join(cfg.Agent.Workspace, sessionID)
 
-	rootAgent, err := core.LoadAgent(cfg.Agent.Root, cfg, sessionID)
+	rootAgent, err := core.LoadAgent(cfg.Agent.Root, cfg, sessionID, workspace)
 	if err != nil {
 		log.Fatalf("Failed to load root agent: %v", err)
 	}
@@ -44,6 +46,9 @@ func main() {
 			fmt.Print("> ")
 			if !scanner.Scan() {
 				break
+			}
+			if err := scanner.Err(); err != nil {
+				fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
 			}
 			line := strings.TrimSpace(scanner.Text())
 			if line == "/quit" {
