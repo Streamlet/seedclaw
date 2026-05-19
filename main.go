@@ -24,7 +24,7 @@ func main() {
 	log.Printf("[session=%s] Session started", sessionID)
 	workspace := filepath.Join(cfg.Agent.Workspace, sessionID)
 
-	rootAgent, err := core.LoadAgent(cfg.Agent.Root, cfg, sessionID, workspace)
+	rootAgent, err := core.LoadAgent(cfg, cfg.Agent.Root, "", sessionID, workspace)
 	if err != nil {
 		log.Fatalf("Failed to load root agent: %v", err)
 	}

@@ -1,7 +1,6 @@
 package core
 
 import (
-	_ "embed"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -72,54 +71,68 @@ type AgentArguments struct {
 	Task string `json:"task"`
 }
 
-//go:embed protocol.md
-var interactionProtocol string // Interaction protocol appended to every system prompt.
-
 var subAgentsDir = "agents" // Relative path to sub-agents from each agent directory
-var systemPromptFileName = "system.md"
-var apiFileName = "api.md"
+var rulesPromptFileName = "rules.md"
+var agentPromptFileName = "agent.md"
+var apiPromptFileName = "api.md"
+var subAgentDescriptionTemplate = `
+================================================================================
+Agent Name: %s
+Agent Description:
+--------------------------------------------------------------------------------
+%s
+================================================================================
+`
 
 type Agent struct {
-	SystemPrompt string
-	Config       *Config
-	SessionID    string
-	AgentDir     string // directory containing system.md and agents/
-	Workspace    string
+	RulesPrompt string
+	AgentPrompt string
+	Config      *Config
+	SessionID   string
+	AgentDir    string // directory containing system.md and agents/
+	Workspace   string
 }
 
-// LoadAgent reads system.md, scans sub-agents, replaces {{AGENTS}}, and returns an Agent.
+// LoadAgent reads agents.md, scans sub-agents, replaces {{AGENTS}}, and returns an Agent.
 // It works identically for root and sub-agents.
-func LoadAgent(dir string, cfg *Config, sessionID string, workspace string) (*Agent, error) {
-	// Read system prompt
-	systemPath := filepath.Join(dir, systemPromptFileName)
-	systemBytes, err := os.ReadFile(systemPath)
-	if err != nil {
-		return nil, fmt.Errorf("read %s from %s: %w", systemPromptFileName, dir, err)
+func LoadAgent(cfg *Config, dir string, rulesPrompt string, sessionID string, workspace string) (*Agent, error) {
+	if rulesPrompt == "" {
+		// Read rule prompt
+		rulePromptFilePath := filepath.Join(dir, rulesPromptFileName)
+		rulePromptBytes, err := os.ReadFile(rulePromptFilePath)
+		if err != nil {
+			return nil, fmt.Errorf("read %s from %s: %w", rulesPromptFileName, dir, err)
+		}
+		rulesPrompt = string(rulePromptBytes)
 	}
-	systemPrompt := string(systemBytes)
+	// Read agent prompt
+	agentPromptFilePath := filepath.Join(dir, agentPromptFileName)
+	agentPromptBytes, err := os.ReadFile(agentPromptFilePath)
+	if err != nil {
+		return nil, fmt.Errorf("read %s from %s: %w", agentPromptFileName, dir, err)
+	}
+	agentPrompt := string(agentPromptBytes)
 
 	// Look for sub-agents
 	agentsDir := filepath.Join(dir, subAgentsDir)
 	entries, err := os.ReadDir(agentsDir)
 	var agentDescriptions string
-	subAgents := []string{}
 	if err == nil && len(entries) > 0 {
-		var parts []string
+		var subAgents []string
 		for _, e := range entries {
 			if !e.IsDir() {
 				continue
 			}
-			apiPath := filepath.Join(agentsDir, e.Name(), apiFileName)
-			apiBytes, err := os.ReadFile(apiPath)
+			apiPromptPath := filepath.Join(agentsDir, e.Name(), apiPromptFileName)
+			apiPromptBytes, err := os.ReadFile(apiPromptPath)
 			if err != nil {
 				// Skip sub-agents without api.md
 				continue
 			}
-			subAgents = append(subAgents, e.Name())
-			parts = append(parts, fmt.Sprintf("## %s\n%s", e.Name(), string(apiBytes)))
+			subAgents = append(subAgents, fmt.Sprintf(subAgentDescriptionTemplate, e.Name(), string(apiPromptBytes)))
 		}
-		if len(parts) > 0 {
-			agentDescriptions = strings.Join(parts, "\n")
+		if len(subAgents) > 0 {
+			agentDescriptions = strings.Join(subAgents, "\n")
 		}
 	}
 	if agentDescriptions == "" {
@@ -127,17 +140,15 @@ func LoadAgent(dir string, cfg *Config, sessionID string, workspace string) (*Ag
 	}
 
 	// Replace placeholder and append protocol
-	finalPrompt := strings.Replace(systemPrompt, "{{AGENTS}}", agentDescriptions, 1)
-	protocol := strings.Replace(interactionProtocol, "{{ALLOWED_AGENTS}}", strings.Join(subAgents, ","), -1)
-	protocol = strings.Replace(protocol, "{{ALLOWED_CMD}}", strings.Join(cfg.Shell.AllowedCmd, ","), -1)
-	finalPrompt += protocol
+	agentPrompt = strings.Replace(agentPrompt, "{{AGENTS}}", agentDescriptions, 1)
 
 	return &Agent{
-		SystemPrompt: finalPrompt,
-		Config:       cfg,
-		SessionID:    sessionID,
-		AgentDir:     dir,
-		Workspace:    workspace,
+		RulesPrompt: rulesPrompt,
+		AgentPrompt: agentPrompt,
+		Config:      cfg,
+		SessionID:   sessionID,
+		AgentDir:    dir,
+		Workspace:   workspace,
 	}, nil
 }
 
@@ -148,7 +159,7 @@ func (a *Agent) Run(userInput string) (string, error) {
 	}
 
 	messages := []Message{
-		{Role: RoleSystem, Content: a.SystemPrompt},
+		{Role: RoleSystem, Content: a.RulesPrompt + "\n" + a.AgentPrompt},
 		{Role: RoleUser, Content: userInput},
 	}
 	log.Printf("[session=%s step=%d] User input: %s", a.SessionID, 0, truncate(userInput, 200))
@@ -192,7 +203,7 @@ func (a *Agent) Run(userInput string) (string, error) {
 						if _, err := os.Stat(subWorkspace); os.IsNotExist(err) {
 							os.Mkdir(subWorkspace, 0755)
 						}
-						subAgent, err := LoadAgent(subAgentDir, a.Config, a.SessionID, subWorkspace)
+						subAgent, err := LoadAgent(a.Config, subAgentDir, a.RulesPrompt, a.SessionID, subWorkspace)
 						if err != nil {
 							return "", fmt.Errorf("load sub-agent %s: %w", args.Name, err)
 						}
