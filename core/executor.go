@@ -114,8 +114,8 @@ func validateCommands(commands []ShellCommand, shellConfig ShellConfig, workspac
 			return fmt.Errorf("Rejected: command '%s' not allowed", command.Command)
 		}
 		if pathLocation, ok := shellConfig.PathLocation[command.Command]; ok {
-			if len(pathLocation.PathPos) > 0 {
-				for _, argIndex := range pathLocation.PathPos {
+			if len(pathLocation.Position) > 0 {
+				for _, argIndex := range pathLocation.Position {
 					if argIndex >= uint(len(command.Arguments)) {
 						continue
 					}
@@ -125,8 +125,8 @@ func validateCommands(commands []ShellCommand, shellConfig ShellConfig, workspac
 					}
 				}
 			}
-			if len(pathLocation.PathAfter) > 0 {
-				for _, previousArgument := range pathLocation.PathAfter {
+			if len(pathLocation.After) > 0 {
+				for _, previousArgument := range pathLocation.After {
 					for i, arg := range command.Arguments {
 						if arg == previousArgument && i+1 < len(command.Arguments) {
 							if err := validatePath(command.Arguments[i+1], workspace); err != nil {
@@ -136,8 +136,8 @@ func validateCommands(commands []ShellCommand, shellConfig ShellConfig, workspac
 					}
 				}
 			}
-			if len(pathLocation.PathPrefix) > 0 {
-				for _, prefix := range pathLocation.PathPrefix {
+			if len(pathLocation.Prefix) > 0 {
+				for _, prefix := range pathLocation.Prefix {
 					log.Printf("validating with prefix %s", prefix)
 					for _, arg := range command.Arguments {
 						if strings.HasPrefix(arg, prefix) {

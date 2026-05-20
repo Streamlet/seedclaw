@@ -121,9 +121,8 @@ var subAgentsDir = "agents" // Relative path to sub-agents from each agent direc
 var rulesPromptFileName = "rules.md"
 var agentPromptFileName = "agent.md"
 var apiPromptFileName = "api.md"
-var subAgentsDescriptionPlaceholder = "{{AGENTS_DESCRIPTION}}"
-var availableSubAgentsPlaceholder = "{{AVAILABLE_AGENTS}}"
-var availableCommandsPlaceholder = "{{AVAILABLE_COMMANDS}}"
+var subAgentsPlaceholder = "{{AGENTS}}"
+var availableCommandsPlaceholder = "{{COMMANDS}}"
 
 type Agent struct {
 	RulesPrompt string
@@ -182,12 +181,7 @@ func LoadAgent(cfg *Config, dir string, rulesPrompt string, sessionID string, wo
 			agentDescriptions = append(agentDescriptions, string(apiPromptBytes))
 		}
 	}
-	var availableSubAgents string
-	if len(agentNames) > 0 {
-		availableSubAgents = strings.Join(agentNames, ", ")
-	} else {
-		availableSubAgents = "(None)"
-	}
+
 	var subAgentDescription string
 	if len(agentDescriptions) > 0 {
 		subAgentDescription = strings.Join(agentDescriptions, "\n")
@@ -196,12 +190,8 @@ func LoadAgent(cfg *Config, dir string, rulesPrompt string, sessionID string, wo
 	}
 
 	// Replace placeholders
-	rulesPrompt = strings.Replace(rulesPrompt, availableSubAgentsPlaceholder, availableSubAgents, -1)
 	rulesPrompt = strings.Replace(rulesPrompt, availableCommandsPlaceholder, availableCommands, -1)
-	rulesPrompt = strings.Replace(rulesPrompt, subAgentsDescriptionPlaceholder, subAgentDescription, -1)
-	agentPrompt = strings.Replace(agentPrompt, availableSubAgentsPlaceholder, availableSubAgents, -1)
-	agentPrompt = strings.Replace(agentPrompt, availableCommandsPlaceholder, availableCommands, -1)
-	agentPrompt = strings.Replace(agentPrompt, subAgentsDescriptionPlaceholder, subAgentDescription, -1)
+	agentPrompt = strings.Replace(agentPrompt, subAgentsPlaceholder, subAgentDescription, -1)
 
 	return &Agent{
 		RulesPrompt: rulesPrompt,
@@ -231,7 +221,6 @@ func (a *Agent) Run(userInput string) (string, error) {
 			Messages: messages,
 			Tools:    Tools,
 		}
-		//log.Printf("[session=%s step=%d] LLM request:\n%s", a.SessionID, step, request)
 		response, err := Chat(&a.Config.LLM, request)
 		if err != nil {
 			return "", fmt.Errorf("LLM call failed: %w", err)
@@ -257,9 +246,11 @@ func (a *Agent) Run(userInput string) (string, error) {
 					if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
 						result = fmt.Sprintf("Invalid agent arguments: %v", err)
 					} else {
+						log.Printf(a.AgentDir, subAgentsDir, args.Name)
 						subAgentDir := filepath.Join(a.AgentDir, subAgentsDir, args.Name)
+						log.Printf(subAgentDir)
 						if _, err := os.Stat(subAgentDir); os.IsNotExist(err) {
-							return fmt.Sprintf("Agent not found: %s", args.Name), nil
+							return fmt.Sprintf("Agent %s not found: %s not exists", args.Name, subAgentDir), nil
 						}
 						subWorkspace := filepath.Join(a.Workspace, args.Name)
 						if _, err := os.Stat(subWorkspace); os.IsNotExist(err) {

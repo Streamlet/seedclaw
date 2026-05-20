@@ -26,14 +26,14 @@ type AgentConfig struct {
 }
 
 type ShellConfig struct {
-	Commands     []string                 `toml:"commands"`
-	PathLocation map[string]CommandConfig `toml:"path_location"`
+	Commands     []string                `toml:"commands"`
+	PathLocation map[string]PathLocation `toml:"path_location"`
 }
 
-type CommandConfig struct {
-	PathPos    []uint   `toml:"path_pos"`
-	PathAfter  []string `toml:"path_after"`
-	PathPrefix []string `toml:"path_prefix"`
+type PathLocation struct {
+	Position []uint   `toml:"position"`
+	After    []string `toml:"after"`
+	Prefix   []string `toml:"prefix"`
 }
 
 func LoadConfig(path string) (*Config, error) {
