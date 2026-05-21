@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-func ShellExec(commands []ShellCommand, sessionID string, shellConfig ShellConfig, workspace string) (string, []int, error) {
+func shellExec(commands []shellCommand, sessionID string, shellConfig ShellConfig, workspace string) (string, []int, error) {
 	if err := validateCommands(commands, shellConfig, workspace); err != nil {
 		return "", nil, err
 	}
@@ -101,7 +101,7 @@ func ShellExec(commands []ShellCommand, sessionID string, shellConfig ShellConfi
 	return finalOutput.String(), exitCodes, nil
 }
 
-func validateCommands(commands []ShellCommand, shellConfig ShellConfig, workspace string) error {
+func validateCommands(commands []shellCommand, shellConfig ShellConfig, workspace string) error {
 	allowedCommands := map[string]bool{}
 	for _, command := range shellConfig.Commands {
 		allowedCommands[command] = true

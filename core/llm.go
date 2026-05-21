@@ -8,9 +8,9 @@ import (
 	"strings"
 )
 
-type ChatCompletionRequest struct {
+type chatCompletionRequest struct {
 	Model            string         `json:"model"`
-	Messages         []Message      `json:"messages"`
+	Messages         []message      `json:"messages"`
 	Temperature      *float64       `json:"temperature,omitempty"`
 	TopP             *float64       `json:"top_p,omitempty"`
 	N                *int           `json:"n,omitempty"`
@@ -21,88 +21,88 @@ type ChatCompletionRequest struct {
 	LogitBias        map[string]int `json:"logit_bias,omitempty"`
 	User             string         `json:"user,omitempty"`
 	Stream           bool           `json:"stream,omitempty"`
-	Tools            []Tool         `json:"tools,omitempty"`
+	Tools            []tool         `json:"tools,omitempty"`
 	ToolChoice       interface{}    `json:"tool_choice,omitempty"`
 	Seed             *int           `json:"seed,omitempty"`
 }
 
-type Message struct {
+type message struct {
 	Role       string     `json:"role"`
 	Content    string     `json:"content"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	ToolCalls  []toolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 	Name       string     `json:"name,omitempty"`
 	Refusal    string     `json:"refusal,omitempty"`
 }
 
-type ToolCall struct {
+type toolCall struct {
 	ID       string   `json:"id"`
 	Type     string   `json:"type"`
-	Function Function `json:"function"`
+	Function function `json:"function"`
 }
 
-type Function struct {
+type function struct {
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"`
 }
 
-type Tool struct {
+type tool struct {
 	Type     string       `json:"type"`
-	Function ToolFunction `json:"function"`
+	Function toolFunction `json:"function"`
 }
 
-type ToolFunction struct {
+type toolFunction struct {
 	Name        string     `json:"name"`
 	Description string     `json:"description"`
-	Parameters  JsonSchema `json:"parameters"`
+	Parameters  jsonSchema `json:"parameters"`
 	Strict      *bool      `json:"strict,omitempty"`
 }
 
-type JsonSchema struct {
+type jsonSchema struct {
 	Type        string                `json:"type"`
 	Description string                `json:"description"`
 	Required    []string              `json:"required,omitempty"`
-	Properties  map[string]JsonSchema `json:"properties,omitempty"` // For object types
-	Items       *JsonSchema           `json:"items,omitempty"`      // For array types
+	Properties  map[string]jsonSchema `json:"properties,omitempty"` // For object types
+	Items       *jsonSchema           `json:"items,omitempty"`      // For array types
 }
 
-type ChatResponse struct {
+type chatResponse struct {
 	ID                string   `json:"id"`
 	Object            string   `json:"object"`                       // usually "chat.completion"
 	Created           int64    `json:"created"`                      // timestamp
 	Model             string   `json:"model"`                        // model used
 	SystemFingerprint string   `json:"system_fingerprint,omitempty"` // optional
-	Choices           []Choice `json:"choices"`
-	Usage             *Usage   `json:"usage,omitempty"`
+	Choices           []choice `json:"choices"`
+	Usage             *usage   `json:"usage,omitempty"`
 }
 
-type Choice struct {
+type choice struct {
 	Index        int      `json:"index"`
-	Message      Message  `json:"message"`
+	Message      message  `json:"message"`
 	FinishReason string   `json:"finish_reason"`
-	Delta        *Message `json:"delta,omitempty"` // used in streaming mode
+	Delta        *message `json:"delta,omitempty"` // used in streaming mode
 }
 
-type Usage struct {
+type usage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
 }
 
-type ErrorResponse struct {
-	Error ErrorData `json:"error"`
+type errorResponse struct {
+	Error errorData `json:"error"`
 }
 
-type ErrorData struct {
+type errorData struct {
 	Message string `json:"message"`
 }
 
-var RoleSystem = "system"
-var RoleUser = "user"
-var RoleAssistant = "assistant"
-var RoleTool = "tool"
+var roleSystem = "system"
+var roleUser = "user"
+var roleAssistant = "assistant"
+var roleTool = "tool"
 
-func Chat(cfg *LLMConfig, request ChatCompletionRequest) (*ChatResponse, error) {
+func chat(cfg *LLMConfig, request chatCompletionRequest) (*chatResponse, error) {
 	request.Model = cfg.Model
 	jsonData, err := json.Marshal(request)
 	if err != nil {
@@ -125,12 +125,12 @@ func Chat(cfg *LLMConfig, request ChatCompletionRequest) (*ChatResponse, error) 
 	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK {
-		var errResp ErrorResponse
+		var errResp errorResponse
 		json.NewDecoder(response.Body).Decode(&errResp)
 		return nil, fmt.Errorf("LLM error %d: %s", response.StatusCode, errResp.Error.Message)
 	}
 
-	var chatResp ChatResponse
+	var chatResp chatResponse
 	if err := json.NewDecoder(response.Body).Decode(&chatResp); err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
