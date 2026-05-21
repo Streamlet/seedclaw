@@ -1,4 +1,4 @@
-module seedclaw
+module bareclaw
 
 go 1.21
 

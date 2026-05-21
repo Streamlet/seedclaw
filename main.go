@@ -1,12 +1,12 @@
 package main
 
 import (
+	"bareclaw/core"
 	"bufio"
 	"flag"
 	"fmt"
 	"log"
 	"os"
-	"seedclaw/core"
 	"strings"
 )
 
@@ -37,7 +37,7 @@ func main() {
 		fmt.Println(result)
 	} else {
 		// Interactive mode
-		fmt.Printf("SeedClaw interactive mode. Type /quit to exit.\n")
+		fmt.Printf("Interactive mode. Type /quit to exit.\n")
 		scanner := bufio.NewScanner(os.Stdin)
 		for {
 			fmt.Print("> ")

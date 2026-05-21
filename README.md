@@ -1,126 +1,67 @@
-# SeedClaw
+# BareClaw
 
-A self-growing agent pipeline from a single `seed.md`.
+An agent pipeline without tools.
 
-## Design
+BareClaw has two primitives: `shell` and `agent`.
 
-SeedClaw has two primitives: `shell` and `agent`.
+- **`shell`** — executes a whitelisted shell command.
+- **`agent`** — spawns a sub‑agent.
 
-- **`shell`** — execute a whitelisted shell command. Only `curl` is allowed by default. You add what you need.
-- **`agent`** — spawn a sub-agent. Sub-agents run independently and return their result.
+Agents are defined by directories. A directory containing an `agent.md` file is an agent. A directory containing an `agents/` subdirectory can spawn sub‑agents. Sub‑agents provide an `api.md` file to their parent agents. Sub‑agents can also have their own `agents/` subdirectory. The tree can be arbitrarily deep.
 
-Every agent in the tree uses these two tools. Nothing else. No built-in file readers, web browsers, or code interpreters. Everything is built from `shell` and `agent`.
+## Configuration
 
-Agents are defined by directories. A directory containing `system.md` is an agent. A directory containing `agents/` can spawn sub-agents. Sub-agents can have their own `agents/`. The tree can be arbitrarily deep.
+Sample:
+
+```toml
+[llm]
+base_url = "https://api.openai.com/v1"  # API endpoint
+model = "gpt-4o"                        # Model name
+api_key = "sk-..."                      # LLM API key
+max_steps = 10                          # Max steps per agent loop
+
+[agent]
+system_dir = "sample/system"    # Root agent path
+history_dir = "sample/history"  # Root history path
+work_dir = "sample/workspace"   # Root workspace path
+
+[shell]
+commands = [ "echo", "cat", "curl" ]    # Allowed shell commands
+
+[shell.path_location.cat]   # Specifies where the path appears in `cat`'s arguments
+position = [0]              # The first argument is the path
+
+[shell.path_location.curl]  # Specifies where the path appears in `curl`'s arguments
+after = ["-o", "--output"]  # The argument after `-o` or `--output` is the path
+prefix = ["--output="]      # The text following `--output=` is the path
+```
+
+Pay attention to the `path_location` section. Three methods — `position`, `after`, and `prefix` — can be used to specify where the path argument is.
+The system will check whether the path is inside the workspace and reject any changes outside the workspace.
+
 
 ## Quick start
 
-### 1. Install
+### 1. Build
 
 ```bash
-git clone https://github.com/yourname/seedclaw.git
-cd seedclaw
-go build -o seedclaw .
+go build
 ```
 
 ### 2. Configure
 
-Create config.toml:
-```toml
-[llm]
-api_key = "sk-your-key-here"
-base_url = "https://api.openai.com/v1"
-model = "gpt-4o"
-max_steps = 10
-
-[agent]
-root = "."
-workspace = "./workspace"
-
-[shell]
-allowed_cmd = [
-    "curl"
-]
-```
+Please refer to the `Configuration` section.
+Save the content as `config.toml`, which is the default config file name.
 
 ### 3. Create your first agent
 
-Write system.md:
-```markdown
-You are SeedClaw, an autonomous AI agent.
-
-## Available Sub-Agents
-{{AGENTS}}
-```
+Create a `system` directory for the main agent, and place `agent.md` and `rules.md` inside it. `rules.md` can be shared by all sub-agents.
+Inside `system/agents`, create subdirectories for sub‑agents as needed; each sub‑agent should contain `api.md` and `agent.md`.
 
 ### 4. Run
 
 ```bash
-./seedclaw "What's the weather in Tokyo?"
-```
-
-Or interactive mode:
-
-```bash
-./seedclaw
-> your task here
+./bareclaw
+> Express your tasks here
 > /quit
 ```
-
-### 5. Create a sub-agent
-
-```bash
-mkdir -p agents/fetch_url
-```
-
-Write agents/fetch_url/api.md:
-
-```markdown
-# fetch_url
-Fetch content from a URL.
-Example:
-agent("fetch_url", "https://api.example.com/data")
-```
-
-Write agents/fetch_url/system.md:
-
-```markdown
-You are an HTTP request specialist. Use curl to fetch URL content.
-
-## Available Sub-Agents
-{{AGENTS}}
-
-## Method
-curl -s <URL>
-Output `fetched content` when done.
-```
-
-The sub-agent is available immediately. No restart required.
-
-
-## Runtime structure
-
-```
-your-agent/
-├── config.toml
-├── system.md              # Agent's system prompt
-├── agents/                # Available sub-agents
-│   └── fetch_url/
-│       ├── api.md         # Public interface
-│       ├── system.md      # Sub-agent's own prompt
-│       └── agents/        # (optional) Deeper sub-agents
-└── workspace/
-   └── <session_id>/      # Session workspace
-```
-
-## Configuration
-
-| Key | Default | Sample |
-| --- | --- | --- |
-| llm.api_key       | LLM API key              | (required) |
-| llm.base_url      | API endpoint             | https://api.openai.com/v1 |
-| llm.model         | Model name               | gpt-4o |
-| llm.max_steps     | Max steps per agent loop | 10 | 
-| agent.root        | Agent root directory     | . | 
-| agent.workspace   | Workspace path           | ./workspace |
-| shell.allowed_cmd | Allowed shell commands   | ["curl"] |
