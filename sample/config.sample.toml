@@ -1,0 +1,25 @@
+[llm]
+base_url = "https://api.openai.com/v1"  # API endpoint
+model = "gpt-4o"                        # Model name
+api_key = "sk-..."                      # LLM API key
+max_steps = 10                          # Max steps per agent loop
+
+[agent]
+system_dir = "system"    # Root agent path
+history_dir = "history"  # Root history path
+work_dir = "workspace"   # Root workspace path
+
+[prompt]
+common = "common.md"            # Common prompt file for all agents
+agent_api = "api.md"            # API description prompt file
+agent_implement = "agent.md"    # Implementation details prompt file
+
+[shell]
+commands = [ "echo", "cat", "curl" ]    # Allowed shell commands
+
+[shell.path_location.cat]   # Specifies where the path appears in `cat`'s arguments
+position = [0]              # The first argument is the path
+
+[shell.path_location.curl]  # Specifies where the path appears in `curl`'s arguments
+after = ["-o", "--output"]  # The argument after `-o` or `--output` is the path
+prefix = ["--output="]      # The text following `--output=` is the path
