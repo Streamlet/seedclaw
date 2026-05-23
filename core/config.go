@@ -9,9 +9,10 @@ import (
 )
 
 type Config struct {
-	LLM   LLMConfig   `toml:"llm"`
-	Agent AgentConfig `toml:"agent"`
-	Shell ShellConfig `toml:"shell"`
+	LLM    LLMConfig    `toml:"llm"`
+	Agent  AgentConfig  `toml:"agent"`
+	Prompt PromptConfig `toml:"prompt"`
+	Shell  ShellConfig  `toml:"shell"`
 }
 
 type LLMConfig struct {
@@ -25,6 +26,12 @@ type AgentConfig struct {
 	SystemDir  string `toml:"system_dir"`
 	HistoryDir string `toml:"history_dir"`
 	WorkDir    string `toml:"work_dir"`
+}
+
+type PromptConfig struct {
+	Common         string `toml:"common"`
+	AgentAPI       string `toml:"agent_api"`
+	AgentImplement string `toml:"agent_implement"`
 }
 
 type ShellConfig struct {

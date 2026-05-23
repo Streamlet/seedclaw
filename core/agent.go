@@ -13,13 +13,10 @@ import (
 
 const (
 	mainAgentName       = "main"
-	rulesPrompt         = "rules.md"
-	agentPrompt         = "agent.md"
-	apiPrompt           = "api.md"
-	agentsPlaceHolder   = "{{AGENTS}}"
-	commandsPlaceHolder = "{{COMMANDS}}"
 	toolAgent           = "agent"
 	toolShell           = "shell"
+	agentsPlaceHolder   = "{{AGENTS}}"
+	commandsPlaceHolder = "{{COMMANDS}}"
 )
 
 var toolsDefine = []tool{
@@ -127,17 +124,17 @@ type shellStderrRedirection struct {
 }
 
 type Agent struct {
-	Name        string
-	PathName    string
-	Config      *Config
-	RulesPrompt string
-	AgentPrompt string
-	SessionID   string
-	ToolCallID  string
-	Messages    []message
-	SystemDir   string
-	HistoryDir  string
-	WorkDir     string
+	Name         string
+	PathName     string
+	Config       *Config
+	CommonPrompt string
+	AgentPrompt  string
+	SessionID    string
+	ToolCallID   string
+	Messages     []message
+	SystemDir    string
+	HistoryDir   string
+	WorkDir      string
 }
 
 func generateSessionID() string {
@@ -177,20 +174,23 @@ func LoadAgent(config *Config, parent *Agent, dir string, toolCallID string) (*A
 	}
 
 	if parent != nil {
-		agent.RulesPrompt = parent.RulesPrompt
-	} else {
-		rulePromptFilePath := filepath.Join(dir, rulesPrompt)
-		rulePromptBytes, err := os.ReadFile(rulePromptFilePath)
+		agent.CommonPrompt = parent.CommonPrompt
+	} else if config.Prompt.Common != "" {
+		commonPromptFilePath := filepath.Join(dir, config.Prompt.Common)
+		commonPromptBytes, err := os.ReadFile(commonPromptFilePath)
 		if err != nil {
-			return nil, fmt.Errorf("read %s from %s: %w", rulesPrompt, dir, err)
+			return nil, fmt.Errorf("failed to load common prompt, read %s from %s: %w", config.Prompt.Common, dir, err)
 		}
-		agent.RulesPrompt = string(rulePromptBytes)
+		agent.CommonPrompt = string(commonPromptBytes)
 	}
 
-	agentPromptFilePath := filepath.Join(dir, agentPrompt)
+	if config.Prompt.AgentImplement == "" {
+		return nil, fmt.Errorf("agent_implement must be specified in config")
+	}
+	agentPromptFilePath := filepath.Join(dir, config.Prompt.AgentImplement)
 	agentPromptBytes, err := os.ReadFile(agentPromptFilePath)
 	if err != nil {
-		return nil, fmt.Errorf("read %s from %s: %w", agentPrompt, dir, err)
+		return nil, fmt.Errorf("failed to load agent implement prompt, read %s from %s: %w", config.Prompt.AgentImplement, dir, err)
 	}
 	agent.AgentPrompt = string(agentPromptBytes)
 
@@ -209,7 +209,7 @@ func LoadAgent(config *Config, parent *Agent, dir string, toolCallID string) (*A
 			if !e.IsDir() {
 				continue
 			}
-			apiPromptPath := filepath.Join(dir, e.Name(), apiPrompt)
+			apiPromptPath := filepath.Join(dir, e.Name(), config.Prompt.AgentAPI)
 			apiPromptBytes, err := os.ReadFile(apiPromptPath)
 			if err != nil {
 				continue
@@ -226,7 +226,7 @@ func LoadAgent(config *Config, parent *Agent, dir string, toolCallID string) (*A
 		subAgentDescription = "No sub-agents available."
 	}
 
-	agent.RulesPrompt = strings.Replace(agent.RulesPrompt, commandsPlaceHolder, availableCommands, -1)
+	agent.CommonPrompt = strings.Replace(agent.CommonPrompt, commandsPlaceHolder, availableCommands, -1)
 	agent.AgentPrompt = strings.Replace(agent.AgentPrompt, agentsPlaceHolder, subAgentDescription, -1)
 
 	return &agent, nil
@@ -268,7 +268,7 @@ func (a *Agent) Run(userInput string) (string, error) {
 	}
 
 	if a.Messages == nil {
-		a.appendHistory(message{Role: roleSystem, Content: a.RulesPrompt + "\n" + a.AgentPrompt})
+		a.appendHistory(message{Role: roleSystem, Content: a.CommonPrompt + "\n" + a.AgentPrompt})
 	}
 	a.appendHistory(message{Role: roleUser, Content: userInput})
 
@@ -300,41 +300,49 @@ func (a *Agent) Run(userInput string) (string, error) {
 				var result string
 				switch tc.Function.Name {
 				case toolAgent:
-					var args agentArguments
-					if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
-						result = fmt.Sprintf("Invalid agent arguments: %v", err)
-					} else {
+					for {
+						var args agentArguments
+						if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
+							result = fmt.Sprintf("Invalid agent arguments: %v", err)
+							break
+						}
 						subAgentDir := filepath.Join(a.SystemDir, args.Name)
 						if _, err := os.Stat(subAgentDir); os.IsNotExist(err) {
-							return fmt.Sprintf("Agent %s not found: %s not exists", args.Name, subAgentDir), nil
+							result = fmt.Sprintf("Agent %s not found: %s not exists", args.Name, subAgentDir)
+							break
 						}
 						subAgent, err := LoadAgent(nil, a, subAgentDir, tc.ID)
 						if err != nil {
-							return "", fmt.Errorf("load sub-agent %s: %w", args.Name, err)
+							result = fmt.Sprintf("load sub-agent %s: %v", args.Name, err)
+							break
 						}
-						res, err := subAgent.Run(args.Task)
+						agentResult, err := subAgent.Run(args.Task)
 						if err != nil {
 							result = fmt.Sprintf("Agent execution failed: %s", err.Error())
-						} else {
-							result = res
+							break
 						}
+						result = agentResult
+						break
 					}
 				case toolShell:
-					var args shellArguments
-					if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
-						result = fmt.Sprintf("Invalid shell arguments: %v", err)
-					} else {
+					for {
+						var args shellArguments
+						if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
+							result = fmt.Sprintf("Invalid shell arguments: %v", err)
+							break
+						}
 						output, exitCodes, err := shellExec(args.Commands, a.SessionID, a.Config.Shell, a.WorkDir)
 						if err != nil {
 							result = fmt.Sprintf("Execution failed: %s", err.Error())
-						} else {
-							result = "Exit Codes: " + fmt.Sprint(exitCodes)
-							if output != "" {
-								result += "\nOutput:\n" + output
-							} else {
-								result += "\n(No output)"
-							}
+							break
 						}
+						result = "Exit Codes: " + fmt.Sprint(exitCodes)
+						if output == "" {
+							result += "\n(No output)"
+							break
+						}
+						result += "\nOutput:\n" + output
+						break
 					}
 				default:
 					result = fmt.Sprintf("Unknown tool: %s", tc.Function.Name)
